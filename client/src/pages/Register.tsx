@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
 import { Link, useLocation } from 'wouter';
+import { trpc } from '@/lib/trpc';
 
 export default function Register() {
   const [formData, setFormData] = useState({
@@ -19,6 +20,10 @@ export default function Register() {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
   };
+
+  const trpcUtils = trpc.useUtils();
+  const registerMutation = trpc.auth.register.useMutation();
+  const profileMutation = trpc.profile.update.useMutation();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -37,11 +42,16 @@ export default function Register() {
     setIsLoading(true);
 
     try {
-      // TODO: Implement JWT register flow
-      // For now, redirect to dashboard
+      await registerMutation.mutateAsync({
+        email: formData.email,
+        password: formData.password,
+        name: formData.businessName
+      });
+      await profileMutation.mutateAsync({ businessName: formData.businessName });
+      await trpcUtils.auth.me.invalidate();
       setLocation('/dashboard');
-    } catch (err) {
-      setError('Registration failed. Please try again.');
+    } catch (err: any) {
+      setError(err.message || 'Registration failed. Please try again.');
     } finally {
       setIsLoading(false);
     }

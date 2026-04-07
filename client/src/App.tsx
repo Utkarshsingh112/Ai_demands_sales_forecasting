@@ -13,7 +13,9 @@ import DataUpload from "./pages/DataUpload";
 import ForecastResults from "./pages/ForecastResults";
 import Reports from "./pages/Reports";
 import Settings from "./pages/Settings";
-
+import ForgotPassword from "./pages/ForgotPassword";
+import { AuthProvider } from "./contexts/AuthContext";
+import { ProtectedRoute } from "./components/ProtectedRoute";
 function Router() {
   // make sure to consider if you need authentication for certain routes
   return (
@@ -21,11 +23,12 @@ function Router() {
       <Route path={"/"} component={Landing} />
       <Route path={"/login"} component={Login} />
       <Route path={"/register"} component={Register} />
-      <Route path={"/dashboard"} component={Dashboard} />
-      <Route path={"/upload"} component={DataUpload} />
-      <Route path={"/forecast"} component={ForecastResults} />
-      <Route path={"/reports"} component={Reports} />
-      <Route path={"/settings"} component={Settings} />
+      <Route path={"/forgot-password"} component={ForgotPassword} />
+      <ProtectedRoute path={"/dashboard"} component={Dashboard} />
+      <ProtectedRoute path={"/upload"} component={DataUpload} />
+      <ProtectedRoute path={"/forecast"} component={ForecastResults} />
+      <ProtectedRoute path={"/reports"} component={Reports} />
+      <ProtectedRoute path={"/settings"} component={Settings} />
       <Route path={"/404"} component={NotFound} />
       {/* Final fallback route */}
       <Route component={NotFound} />
@@ -47,7 +50,9 @@ function App() {
       >
         <TooltipProvider>
           <Toaster />
-          <Router />
+          <AuthProvider>
+            <Router />
+          </AuthProvider>
         </TooltipProvider>
       </ThemeProvider>
     </ErrorBoundary>

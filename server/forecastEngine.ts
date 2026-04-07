@@ -42,8 +42,9 @@ function parseDate(dateStr: string | Date): Date {
   return new Date(dateStr);
 }
 
-// Helper: Format date to YYYY-MM-DD
+// Helper: Format date to YYYY-MM-DD (never throws on invalid dates)
 function formatDate(date: Date): string {
+  if (!date || isNaN(date.getTime())) return '';
   return date.toISOString().split('T')[0];
 }
 
@@ -153,36 +154,36 @@ function generateForecast(
   dates: Date[],
   horizon: number,
   regression: { slope: number; intercept: number; r2: number },
-  seasonality: Map<number, number>
+  seasonality: Map<number, number>,
+  avgPricePerUnit: number
 ): { forecastPoints: ForecastPoint[]; trend: 'up' | 'down' | 'stable' } {
   const forecastPoints: ForecastPoint[] = [];
   const lastDate = dates[dates.length - 1];
-  const confidenceScore = regression.r2 * 100;
-  
+
   // Determine trend
   const slopeThreshold = 0.01;
   let trend: 'up' | 'down' | 'stable' = 'stable';
   if (regression.slope > slopeThreshold) trend = 'up';
   else if (regression.slope < -slopeThreshold) trend = 'down';
-  
+
   for (let i = 1; i <= horizon; i++) {
     const futureDate = addDays(lastDate, i);
     const dayOfWeek = futureDate.getDay();
     const seasonalMultiplier = seasonality.get(dayOfWeek) || 1;
-    
+
     const timeIndex = dates.length - 1 + i;
     const basePrediction = regression.slope * timeIndex + regression.intercept;
     const predicted = Math.max(0, basePrediction * seasonalMultiplier);
-    
+
     forecastPoints.push({
       date: formatDate(futureDate),
       predictedQty: Math.round(predicted),
-      predictedRevenue: Math.round(predicted * 1.5), // Rough estimate
+      predictedRevenue: Math.round(predicted * avgPricePerUnit),
       lower: Math.round(predicted * 0.85),
       upper: Math.round(predicted * 1.15),
     });
   }
-  
+
   return { forecastPoints, trend };
 }
 
@@ -229,9 +230,30 @@ export async function runForecast(records: SalesRecord[], horizon: number = 30):
   if (records.length === 0) {
     throw new Error('No sales data provided');
   }
-  
+
+  // Filter out records whose date doesn't parse to a real date
+  const validRecords = records.filter(r => {
+    const d = parseDate(r.date);
+    return !isNaN(d.getTime());
+  });
+
+  if (validRecords.length === 0) {
+    throw new Error(
+      'None of your records have a recognisable date. ' +
+      'Please check that the "Date" column contains actual dates (e.g. 2024-01-15 or 15/01/2024), ' +
+      'not values like "in_stock" or product IDs.'
+    );
+  }
+
+  if (validRecords.length < records.length * 0.4) {
+    throw new Error(
+      `Only ${validRecords.length} of ${records.length} rows have a valid date. ` +
+      'Please re-check your Date column mapping.'
+    );
+  }
+
   // Sort records by date
-  const sortedRecords = [...records].sort((a, b) => 
+  const sortedRecords = [...validRecords].sort((a, b) =>
     parseDate(a.date).getTime() - parseDate(b.date).getTime()
   );
   
@@ -245,15 +267,20 @@ export async function runForecast(records: SalesRecord[], horizon: number = 30):
   
   // Step 2: Calculate moving averages
   const ma7 = calculateWeightedMovingAverage(qtyValues, Math.min(7, qtyValues.length));
-  
+
   // Step 3: Linear regression
   const regression = linearRegression(ma7);
-  
+
   // Step 4: Seasonality
   const seasonality = detectSeasonality(dates, qtyValues);
-  
+
+  // Avg price per unit from historical data
+  const totalQty = qtyValues.reduce((a, b) => a + b, 0);
+  const totalRevenue = revenueValues.reduce((a, b) => a + b, 0);
+  const avgPricePerUnit = totalQty > 0 ? totalRevenue / totalQty : 1;
+
   // Step 5-6: Generate forecast
-  const { forecastPoints, trend } = generateForecast(qtyValues, dates, horizon, regression, seasonality);
+  const { forecastPoints, trend } = generateForecast(qtyValues, dates, horizon, regression, seasonality, avgPricePerUnit);
   
   // Product-level forecasts
   const productMap = new Map<string, SalesRecord[]>();

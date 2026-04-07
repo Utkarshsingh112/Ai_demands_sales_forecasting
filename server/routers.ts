@@ -15,6 +15,8 @@ import {
   getReportsByUser,
   createOrUpdateUserProfile,
   getUserProfile,
+  getUserByEmail,
+  upsertUser,
 } from "./db";
 import { runForecast } from "./forecastEngine";
 import { generateAIInsights, detectSignificantChanges } from "./aiInsights";
@@ -25,6 +27,124 @@ export const appRouter = router({
   system: systemRouter,
   auth: router({
     me: publicProcedure.query(opts => opts.ctx.user),
+    
+    register: publicProcedure
+      .input(z.object({ email: z.string().email(), password: z.string().min(6), name: z.string().optional() }))
+      .mutation(async ({ ctx, input }) => {
+        const existing = await getUserByEmail(input.email);
+        if (existing) throw new Error("User already exists");
+        
+        const { hashPassword } = await import("./_core/hash");
+        const passwordHash = hashPassword(input.password);
+        
+        await upsertUser({
+          email: input.email,
+          name: input.name || null,
+          passwordHash,
+          loginMethod: 'email',
+        });
+        
+        const { signSession } = await import("./_core/jwt");
+        const token = await signSession({ email: input.email, name: input.name });
+        const cookieOptions = getSessionCookieOptions(ctx.req);
+        ctx.res.cookie(COOKIE_NAME, token, cookieOptions);
+        
+        return { success: true };
+      }),
+      
+    login: publicProcedure
+      .input(z.object({ email: z.string().email(), password: z.string() }))
+      .mutation(async ({ ctx, input }) => {
+        const user = await getUserByEmail(input.email);
+        if (!user) throw new Error("Invalid email or password");
+        
+        const { verifyPassword } = await import("./_core/hash");
+        if (!verifyPassword(input.password, user.passwordHash)) {
+          throw new Error("Invalid email or password");
+        }
+        
+        const { signSession } = await import("./_core/jwt");
+        const token = await signSession({ email: user.email, name: user.name });
+        const cookieOptions = getSessionCookieOptions(ctx.req);
+        ctx.res.cookie(COOKIE_NAME, token, cookieOptions);
+        
+        return { success: true };
+      }),
+      
+    forgotPassword: publicProcedure
+      .input(z.object({ email: z.string().email() }))
+      .mutation(async ({ input }) => {
+        const user = await getUserByEmail(input.email);
+        if (!user) {
+          // We return success to prevent email enumeration
+          return { success: true };
+        }
+        
+        // Generate a 6 digit OTP
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        
+        // Expiry in 15 minutes
+        const expiry = new Date(Date.now() + 15 * 60 * 1000);
+        
+        const UserModel = (await import("./models")).UserModel;
+        await UserModel.findOneAndUpdate(
+          { email: input.email },
+          { $set: { resetPasswordOtp: otp, resetPasswordOtpExpiry: expiry } }
+        );
+        
+        console.log(`[DEV OTP NOTIFICATION] OTP for ${input.email} is: ${otp}`);
+        
+        // Try sending via nodemailer. If it fails, we fall back to console logging
+        try {
+          const nodemailer = await import("nodemailer");
+          // Note: configure proper SMTP below for production
+          const transporter = nodemailer.createTransport({
+            host: process.env.SMTP_HOST || 'smtp.ethereal.email',
+            port: parseInt(process.env.SMTP_PORT || '587'),
+            auth: {
+              user: process.env.SMTP_USER || 'ethereal.user@ethereal.email',
+              pass: process.env.SMTP_PASS || 'ethereal.pass',
+            }
+          });
+          
+          await transporter.sendMail({
+            from: '"ForecastIQ Support" <support@forecastiq.com>',
+            to: input.email,
+            subject: 'Password Reset Request',
+            text: `Your password reset OTP is: ${otp}. It is valid for 15 minutes.`,
+          });
+        } catch (error) {
+          console.warn("[Mailer] Failed to send email via SMTP, logged OTP to console instead", error);
+        }
+        
+        return { success: true };
+      }),
+      
+    resetPassword: publicProcedure
+      .input(z.object({ email: z.string().email(), otp: z.string(), newPassword: z.string().min(6) }))
+      .mutation(async ({ input }) => {
+        const UserModel = (await import("./models")).UserModel;
+        const userDoc = await UserModel.findOne({ email: input.email });
+        
+        if (!userDoc || !userDoc.resetPasswordOtp || !userDoc.resetPasswordOtpExpiry) {
+           throw new Error("Invalid request");
+        }
+        
+        if (new Date() > userDoc.resetPasswordOtpExpiry || userDoc.resetPasswordOtp !== input.otp) {
+           throw new Error("Invalid or expired OTP");
+        }
+        
+        const { hashPassword } = await import("./_core/hash");
+        const passwordHash = hashPassword(input.newPassword);
+        
+        userDoc.passwordHash = passwordHash;
+        userDoc.resetPasswordOtp = null;
+        userDoc.resetPasswordOtpExpiry = null;
+        await userDoc.save();
+        
+        return { success: true };
+      }),
+
     logout: publicProcedure.mutation(({ ctx }) => {
       const cookieOptions = getSessionCookieOptions(ctx.req);
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
@@ -53,7 +173,7 @@ export const appRouter = router({
       )
       .mutation(async ({ ctx, input }) => {
         const result = await createSalesData(String(ctx.user.id), input.datasetName, input.records);
-        return { success: true, message: "Data uploaded successfully" };
+        return { success: true, datasetId: result.insertId };
       }),
 
     list: protectedProcedure.query(async ({ ctx }) => {
@@ -141,6 +261,7 @@ export const appRouter = router({
         }
         return {
           id: forecast.id,
+          horizon: forecast.horizon,
           overallTrend: forecast.overallTrend,
           confidenceScore: forecast.confidenceScore,
           forecastData: Array.isArray(forecast.forecastData) ? forecast.forecastData : JSON.parse(forecast.forecastData as any),

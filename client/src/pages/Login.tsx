@@ -13,17 +13,20 @@ export default function Login() {
   const [isLoading, setIsLoading] = useState(false);
   const [, setLocation] = useLocation();
 
+  const trpcUtils = trpc.useUtils();
+  const loginMutation = trpc.auth.login.useMutation();
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setIsLoading(true);
 
     try {
-      // TODO: Implement JWT login flow
-      // For now, redirect to dashboard
+      await loginMutation.mutateAsync({ email, password });
+      await trpcUtils.auth.me.invalidate();
       setLocation('/dashboard');
-    } catch (err) {
-      setError('Invalid email or password');
+    } catch (err: any) {
+      setError(err.message || 'Invalid email or password');
     } finally {
       setIsLoading(false);
     }

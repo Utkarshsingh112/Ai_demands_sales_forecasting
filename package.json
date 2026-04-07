@@ -65,6 +65,7 @@
     "mongoose": "^9.4.1",
     "nanoid": "^5.1.5",
     "next-themes": "^0.4.6",
+    "nodemailer": "^8.0.4",
     "papaparse": "^5.5.3",
     "react": "^19.2.1",
     "react-day-picker": "^9.11.1",
@@ -79,6 +80,7 @@
     "tailwindcss-animate": "^1.0.7",
     "vaul": "^1.1.2",
     "wouter": "^3.3.5",
+    "xlsx": "^0.18.5",
     "zod": "^4.1.12"
   },
   "devDependencies": {
@@ -89,6 +91,7 @@
     "@types/google.maps": "^3.58.1",
     "@types/mongoose": "^5.11.97",
     "@types/node": "^24.7.0",
+    "@types/nodemailer": "^8.0.0",
     "@types/react": "^19.2.1",
     "@types/react-dom": "^19.2.1",
     "@vitejs/plugin-react": "^5.0.4",

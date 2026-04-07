@@ -27,8 +27,8 @@ export async function getDb() {
 }
 
 export async function upsertUser(user: InsertUser): Promise<void> {
-  if (!user.openId) {
-    throw new Error("User openId is required for upsert");
+  if (!user.email) {
+    throw new Error("User email is required for upsert");
   }
 
   const db = await getDb();
@@ -40,14 +40,14 @@ export async function upsertUser(user: InsertUser): Promise<void> {
   try {
     const updateSet: any = { ...user };
     
-    if (user.openId === ENV.ownerOpenId && !updateSet.role) {
+    if (user.email === ENV.ownerOpenId && !updateSet.role) {
       updateSet.role = 'admin';
     }
 
     updateSet.lastSignedIn = new Date();
 
     await UserModel.findOneAndUpdate(
-      { openId: user.openId },
+      { email: user.email },
       { $set: updateSet },
       { upsert: true, new: true }
     ).exec();
@@ -57,11 +57,11 @@ export async function upsertUser(user: InsertUser): Promise<void> {
   }
 }
 
-export async function getUserByOpenId(openId: string) {
+export async function getUserByEmail(email: string) {
   const db = await getDb();
   if (!db) return undefined;
 
-  const result = await UserModel.findOne({ openId }).exec();
+  const result = await UserModel.findOne({ email }).exec();
   return result ? result.toObject() : undefined;
 }
 

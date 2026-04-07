@@ -4,24 +4,28 @@ import mongoose, { Schema, Document } from 'mongoose';
 export interface User extends Document {
   _id: mongoose.Types.ObjectId;
   id: string; // Virtual
-  openId: string;
+  email: string;
   name?: string | null;
-  email?: string | null;
+  passwordHash: string;
   loginMethod?: string | null;
   role: 'user' | 'admin';
+  resetPasswordOtp?: string | null;
+  resetPasswordOtpExpiry?: Date | null;
   createdAt: Date;
   updatedAt: Date;
   lastSignedIn: Date;
 }
 
-export type InsertUser = Partial<Omit<User, 'id' | '_id' | 'createdAt' | 'updatedAt'>> & { openId: string };
+export type InsertUser = Partial<Omit<User, 'id' | '_id' | 'createdAt' | 'updatedAt'>> & { email: string };
 
 const userSchema = new Schema<User>({
-  openId: { type: String, required: true, unique: true },
+  email: { type: String, required: true, unique: true },
   name: { type: String, default: null },
-  email: { type: String, default: null },
-  loginMethod: { type: String, default: null },
+  passwordHash: { type: String, required: true },
+  loginMethod: { type: String, default: 'email' },
   role: { type: String, enum: ['user', 'admin'], default: 'user' },
+  resetPasswordOtp: { type: String, default: null },
+  resetPasswordOtpExpiry: { type: Date, default: null },
   lastSignedIn: { type: Date, default: Date.now },
 }, { timestamps: true });
 
