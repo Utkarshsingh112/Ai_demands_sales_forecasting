@@ -81,7 +81,7 @@ export default function Landing() {
                   <ArrowRight size={18} />
                 </motion.a>
               </Button>
-              <Button variant="outline" size="lg" className="border border-white/20 text-slate-300 hover:border-white/40 hover:bg-transparent bg-transparent backdrop-blur-md">
+                      <Button variant="outline" size="lg" className="border border-white/20 text-slate-300 hover:border-white/40 hover:bg-transparent bg-transparent backdrop-blur-md" onClick={() => document.getElementById('how-it-works')?.scrollIntoView({ behavior: 'smooth' })}>
                 See How It Works
               </Button>
             </div>
@@ -193,22 +193,22 @@ export default function Landing() {
       </section>
 
       {/* How It Works */}
-      <section className="container py-20 md:py-32 border-t border-white/[0.06] relative z-10">
+      <section id="how-it-works" className="container py-20 md:py-32 border-t border-white/[0.06] relative z-10">
         <h2 className="text-4xl md:text-5xl font-display font-bold text-center mb-16 text-slate-200">
           How It Works
         </h2>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8 md:gap-12 relative">
-          <div className="absolute top-[20%] left-0 w-full h-px bg-white/[0.06] hidden md:block" />
-          
+          <div className="absolute top-[36px] left-[calc(100%/6)] right-[calc(100%/6)] h-px bg-white/[0.06] hidden md:block" />
+
           {[
             { number: '1', title: 'Upload Your Data', description: 'Paste your sales history or upload a file. Takes 2 minutes.' },
             { number: '2', title: 'Analyze Patterns', description: 'Our engine detects trends, seasonality, and anomalies.' },
             { number: '3', title: 'Get Forecast', description: 'Receive predictions with confidence scores and actionable insights.' },
           ].map((step, i) => (
-            <div key={i} className="text-center relative z-10">
-              <div className="text-5xl font-mono font-black text-amber-500 mb-4 inline-block drop-shadow-sm">
-                {step.number}
+            <div key={i} className="flex flex-col items-center text-center relative z-10">
+              <div className="w-[72px] h-[72px] flex items-center justify-center rounded-full bg-amber-500/10 border border-amber-500/30 mb-6">
+                <span className="text-3xl font-mono font-black text-amber-400">{step.number}</span>
               </div>
               <h3 className="text-2xl font-display font-bold mb-3 text-slate-200">{step.title}</h3>
               <p className="text-slate-400 leading-relaxed">{step.description}</p>
@@ -230,7 +230,7 @@ export default function Landing() {
             Join businesses that are making smarter decisions with ForecastIQ.
           </p>
           <Button size="lg" asChild className="relative z-10 bg-amber-400 text-slate-950 font-medium hover:bg-amber-300 transition-all border-none">
-            <motion.a whileHover={{ boxShadow: '0 0 24px rgba(245,158,11,0.15)' }} href={getLoginUrl()}>
+            <motion.a whileHover={{ boxShadow: '0 0 24px rgba(245,158,11,0.15)' }} href="/register">
               Create Your Free Account
             </motion.a>
           </Button>

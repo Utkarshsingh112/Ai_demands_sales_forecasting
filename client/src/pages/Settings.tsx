@@ -2,15 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Moon, Sun, Save, LogOut, Trash2 } from 'lucide-react';
+import { Save, LogOut, Trash2 } from 'lucide-react';
 import { trpc } from '@/lib/trpc';
 import { useAuth } from '@/contexts/AuthContext';
-import { useTheme } from '@/contexts/ThemeContext';
+
 import { useLocation } from 'wouter';
 
 export default function Settings() {
   const { user, logout } = useAuth();
-  const { theme, setTheme } = useTheme();
   const [, setLocation] = useLocation();
 
   const [businessName, setBusinessName] = useState('');
@@ -152,39 +151,6 @@ export default function Settings() {
               <Save className="w-4 h-4 mr-2" />
               {saveLabel}
             </Button>
-          </div>
-        </Card>
-
-        {/* Theme Settings */}
-        <Card className="p-6 space-y-6">
-          <h2 className="text-2xl font-serif font-bold">Appearance</h2>
-
-          <div className="space-y-4">
-            <label className="block text-sm font-medium text-foreground mb-4">
-              Theme
-            </label>
-            <div className="grid grid-cols-2 gap-4">
-              {[
-                { value: 'light' as const, label: 'Light', icon: Sun },
-                { value: 'dark' as const, label: 'Dark', icon: Moon },
-              ].map(option => {
-                const Icon = option.icon;
-                return (
-                  <button
-                    key={option.value}
-                    onClick={() => setTheme?.(option.value)}
-                    className={`p-4 rounded-lg border-2 transition-all ${
-                      theme === option.value
-                        ? 'border-accent bg-accent/10'
-                        : 'border-border/50 hover:border-border'
-                    }`}
-                  >
-                    <Icon className="w-6 h-6 mb-2" />
-                    <p className="font-medium">{option.label}</p>
-                  </button>
-                );
-              })}
-            </div>
           </div>
         </Card>
 
