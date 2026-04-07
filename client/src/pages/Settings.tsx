@@ -1,35 +1,66 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-
-import { Moon, Sun, Save, LogOut } from 'lucide-react';
+import { Moon, Sun, Save, LogOut, Trash2 } from 'lucide-react';
+import { trpc } from '@/lib/trpc';
+import { useAuth } from '@/contexts/AuthContext';
+import { useTheme } from '@/contexts/ThemeContext';
+import { useLocation } from 'wouter';
 
 export default function Settings() {
-  const [profile, setProfile] = useState({
-    businessName: 'Acme Corporation',
-    email: 'admin@acme.com',
-    industry: 'Retail',
-    currency: 'INR',
+  const { user, logout } = useAuth();
+  const { theme, setTheme } = useTheme();
+  const [, setLocation] = useLocation();
+
+  const [businessName, setBusinessName] = useState('');
+  const [industry, setIndustry] = useState('Retail');
+  const [currency, setCurrency] = useState('INR');
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
+
+  // Load profile from server
+  const { data: profileData } = trpc.profile.get.useQuery();
+  const updateProfile = trpc.profile.update.useMutation();
+  const deleteAccount = trpc.auth.deleteAccount.useMutation({
+    onSuccess: () => {
+      setLocation('/login');
+    },
   });
 
-  const [theme, setTheme] = useState<'light' | 'dark'>('light');
-  const [isSaving, setIsSaving] = useState(false);
-
-  const handleProfileChange = (field: string, value: string) => {
-    setProfile(prev => ({ ...prev, [field]: value }));
-  };
+  useEffect(() => {
+    if (profileData) {
+      setBusinessName(profileData.businessName || '');
+      setIndustry(profileData.industry || 'Retail');
+      setCurrency(profileData.currency || 'INR');
+    }
+  }, [profileData]);
 
   const handleSaveProfile = async () => {
-    setIsSaving(true);
+    setSaveStatus('saving');
     try {
-      // TODO: Call profile.update tRPC mutation
-      console.log('Saving profile:', profile);
-      // Show success toast
-    } finally {
-      setIsSaving(false);
+      await updateProfile.mutateAsync({ businessName, industry, currency });
+      setSaveStatus('saved');
+      setTimeout(() => setSaveStatus('idle'), 2000);
+    } catch {
+      setSaveStatus('error');
+      setTimeout(() => setSaveStatus('idle'), 3000);
     }
   };
+
+  const handleDeleteAccount = async () => {
+    if (deleteConfirmText !== 'DELETE') return;
+    await deleteAccount.mutateAsync();
+  };
+
+  const saveLabel = saveStatus === 'saving'
+    ? 'Saving...'
+    : saveStatus === 'saved'
+    ? 'Saved!'
+    : saveStatus === 'error'
+    ? 'Error — try again'
+    : 'Save Changes';
 
   return (
     <div className="min-h-screen bg-background p-4 md:p-8">
@@ -44,11 +75,23 @@ export default function Settings() {
 
         {/* Business Profile */}
         <Card className="p-6 space-y-6">
-          <div>
-            <h2 className="text-2xl font-serif font-bold mb-6">Business Profile</h2>
-          </div>
+          <h2 className="text-2xl font-serif font-bold">Business Profile</h2>
 
           <div className="space-y-4">
+            {/* Email (read-only) */}
+            <div>
+              <label className="block text-sm font-medium text-foreground mb-2">
+                Email Address
+              </label>
+              <Input
+                type="email"
+                value={user?.email || ''}
+                disabled
+                className="opacity-60 cursor-not-allowed"
+              />
+              <p className="text-xs text-muted-foreground mt-1">Email cannot be changed</p>
+            </div>
+
             {/* Business Name */}
             <div>
               <label className="block text-sm font-medium text-foreground mb-2">
@@ -56,20 +99,9 @@ export default function Settings() {
               </label>
               <Input
                 type="text"
-                value={profile.businessName}
-                onChange={(e) => handleProfileChange('businessName', e.target.value)}
-              />
-            </div>
-
-            {/* Email */}
-            <div>
-              <label className="block text-sm font-medium text-foreground mb-2">
-                Email Address
-              </label>
-              <Input
-                type="email"
-                value={profile.email}
-                onChange={(e) => handleProfileChange('email', e.target.value)}
+                value={businessName}
+                onChange={(e) => setBusinessName(e.target.value)}
+                placeholder="Your business name"
               />
             </div>
 
@@ -79,15 +111,13 @@ export default function Settings() {
                 Industry
               </label>
               <select
-                value={profile.industry}
-                onChange={(e: React.ChangeEvent<HTMLSelectElement>) => handleProfileChange('industry', e.target.value)}
+                value={industry}
+                onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setIndustry(e.target.value)}
                 className="w-full px-3 py-2 border border-border rounded-lg bg-background text-foreground"
               >
-                <option value="Retail">Retail</option>
-                <option value="Restaurant">Restaurant</option>
-                <option value="E-Commerce">E-Commerce</option>
-                <option value="Manufacturing">Manufacturing</option>
-                <option value="Other">Other</option>
+                {['Retail', 'Restaurant', 'E-Commerce', 'Manufacturing', 'Other'].map(opt => (
+                  <option key={opt} value={opt} style={{ backgroundColor: 'var(--background)', color: 'var(--foreground)' }}>{opt}</option>
+                ))}
               </select>
             </div>
 
@@ -97,14 +127,18 @@ export default function Settings() {
                 Currency
               </label>
               <select
-                value={profile.currency}
-                onChange={(e: React.ChangeEvent<HTMLSelectElement>) => handleProfileChange('currency', e.target.value)}
+                value={currency}
+                onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setCurrency(e.target.value)}
                 className="w-full px-3 py-2 border border-border rounded-lg bg-background text-foreground"
               >
-                <option value="INR">Indian Rupee (₹)</option>
-                <option value="USD">US Dollar ($)</option>
-                <option value="EUR">Euro (€)</option>
-                <option value="GBP">British Pound (£)</option>
+                {[
+                  { value: 'INR', label: 'Indian Rupee (₹)' },
+                  { value: 'USD', label: 'US Dollar ($)' },
+                  { value: 'EUR', label: 'Euro (€)' },
+                  { value: 'GBP', label: 'British Pound (£)' },
+                ].map(opt => (
+                  <option key={opt.value} value={opt.value} style={{ backgroundColor: 'var(--background)', color: 'var(--foreground)' }}>{opt.label}</option>
+                ))}
               </select>
             </div>
           </div>
@@ -113,10 +147,10 @@ export default function Settings() {
             <Button
               variant="primary"
               onClick={handleSaveProfile}
-              disabled={isSaving}
+              disabled={saveStatus === 'saving'}
             >
               <Save className="w-4 h-4 mr-2" />
-              {isSaving ? 'Saving...' : 'Save Changes'}
+              {saveLabel}
             </Button>
           </div>
         </Card>
@@ -131,14 +165,14 @@ export default function Settings() {
             </label>
             <div className="grid grid-cols-2 gap-4">
               {[
-                { value: 'light', label: 'Light', icon: Sun },
-                { value: 'dark', label: 'Dark', icon: Moon },
+                { value: 'light' as const, label: 'Light', icon: Sun },
+                { value: 'dark' as const, label: 'Dark', icon: Moon },
               ].map(option => {
                 const Icon = option.icon;
                 return (
                   <button
                     key={option.value}
-                    onClick={() => setTheme(option.value as 'light' | 'dark')}
+                    onClick={() => setTheme?.(option.value)}
                     className={`p-4 rounded-lg border-2 transition-all ${
                       theme === option.value
                         ? 'border-accent bg-accent/10'
@@ -185,9 +219,9 @@ export default function Settings() {
             <div>
               <h3 className="font-serif font-bold mb-2">Sign Out</h3>
               <p className="text-sm text-muted-foreground mb-4">
-                Sign out from all devices
+                Sign out from your current session
               </p>
-              <Button variant="outline">
+              <Button variant="outline" onClick={logout}>
                 <LogOut className="w-4 h-4 mr-2" />
                 Sign Out
               </Button>
@@ -196,11 +230,45 @@ export default function Settings() {
             <div className="border-t border-border/50 pt-4">
               <h3 className="font-serif font-bold mb-2">Delete Account</h3>
               <p className="text-sm text-muted-foreground mb-4">
-                Permanently delete your account and all associated data
+                Permanently delete your account and all associated data. This cannot be undone.
               </p>
-              <Button variant="destructive">
-                Delete Account
-              </Button>
+
+              {!showDeleteConfirm ? (
+                <Button variant="destructive" onClick={() => setShowDeleteConfirm(true)}>
+                  <Trash2 className="w-4 h-4 mr-2" />
+                  Delete Account
+                </Button>
+              ) : (
+                <div className="space-y-3 p-4 border border-destructive/50 rounded-lg bg-destructive/5">
+                  <p className="text-sm font-medium text-destructive">
+                    This will permanently delete your account, all datasets, forecasts, and reports.
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    Type <strong>DELETE</strong> to confirm:
+                  </p>
+                  <Input
+                    value={deleteConfirmText}
+                    onChange={(e) => setDeleteConfirmText(e.target.value)}
+                    placeholder="Type DELETE to confirm"
+                    className="border-destructive/50"
+                  />
+                  <div className="flex gap-3">
+                    <Button
+                      variant="destructive"
+                      onClick={handleDeleteAccount}
+                      disabled={deleteConfirmText !== 'DELETE' || deleteAccount.isPending}
+                    >
+                      {deleteAccount.isPending ? 'Deleting...' : 'Confirm Delete'}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => { setShowDeleteConfirm(false); setDeleteConfirmText(''); }}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </Card>

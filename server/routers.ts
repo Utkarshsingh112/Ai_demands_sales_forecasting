@@ -27,130 +27,158 @@ export const appRouter = router({
   system: systemRouter,
   auth: router({
     me: publicProcedure.query(opts => opts.ctx.user),
-    
-    register: publicProcedure
-      .input(z.object({ email: z.string().email(), password: z.string().min(6), name: z.string().optional() }))
-      .mutation(async ({ ctx, input }) => {
+
+    // ── Step 1 of registration: send OTP to verify the email is real ──────────
+    sendRegistrationOtp: publicProcedure
+      .input(z.object({ email: z.string().email() }))
+      .mutation(async ({ input }) => {
         const existing = await getUserByEmail(input.email);
-        if (existing) throw new Error("User already exists");
-        
-        const { hashPassword } = await import("./_core/hash");
-        const passwordHash = hashPassword(input.password);
-        
-        await upsertUser({
-          email: input.email,
-          name: input.name || null,
-          passwordHash,
-          loginMethod: 'email',
-        });
-        
-        const { signSession } = await import("./_core/jwt");
-        const token = await signSession({ email: input.email, name: input.name });
-        const cookieOptions = getSessionCookieOptions(ctx.req);
-        ctx.res.cookie(COOKIE_NAME, token, cookieOptions);
-        
+        if (existing) throw new Error("An account with this email already exists.");
+
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
+
+        const { OtpModel } = await import("./models");
+        // Remove any previous unused OTPs for this email
+        await OtpModel.deleteMany({ email: input.email, purpose: "registration" });
+        await OtpModel.create({ email: input.email, otp, purpose: "registration", expiresAt });
+
+        console.log(`[DEV] Registration OTP for ${input.email}: ${otp}`);
+
+        const { sendEmail, otpEmailHtml } = await import("./_core/email");
+        await sendEmail(
+          input.email,
+          "Verify your ForecastIQ email",
+          otpEmailHtml(otp, "verification")
+        );
+
         return { success: true };
       }),
-      
+
+    // ── Step 2 of registration: verify OTP then create account ───────────────
+    register: publicProcedure
+      .input(z.object({
+        email: z.string().email(),
+        password: z.string().min(8),
+        name: z.string().optional(),
+        otp: z.string().length(6),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const { OtpModel } = await import("./models");
+        const record = await OtpModel.findOne({ email: input.email, purpose: "registration" });
+
+        if (!record) throw new Error("No verification code found. Please request a new one.");
+        if (new Date() > record.expiresAt) throw new Error("Verification code has expired. Please request a new one.");
+        if (record.otp !== input.otp) throw new Error("Incorrect verification code.");
+
+        const existing = await getUserByEmail(input.email);
+        if (existing) throw new Error("An account with this email already exists.");
+
+        const { hashPassword } = await import("./_core/hash");
+        const passwordHash = hashPassword(input.password);
+
+        await upsertUser({ email: input.email, name: input.name || null, passwordHash, loginMethod: "email" });
+        await OtpModel.deleteMany({ email: input.email, purpose: "registration" });
+
+        const { signSession } = await import("./_core/jwt");
+        const token = await signSession({ email: input.email, name: input.name });
+        ctx.res.cookie(COOKIE_NAME, token, getSessionCookieOptions(ctx.req));
+
+        return { success: true };
+      }),
+
     login: publicProcedure
       .input(z.object({ email: z.string().email(), password: z.string() }))
       .mutation(async ({ ctx, input }) => {
         const user = await getUserByEmail(input.email);
         if (!user) throw new Error("Invalid email or password");
-        
+
         const { verifyPassword } = await import("./_core/hash");
         if (!verifyPassword(input.password, user.passwordHash)) {
           throw new Error("Invalid email or password");
         }
-        
+
         const { signSession } = await import("./_core/jwt");
         const token = await signSession({ email: user.email, name: user.name });
-        const cookieOptions = getSessionCookieOptions(ctx.req);
-        ctx.res.cookie(COOKIE_NAME, token, cookieOptions);
-        
+        ctx.res.cookie(COOKIE_NAME, token, getSessionCookieOptions(ctx.req));
+
         return { success: true };
       }),
-      
+
+    // ── Step 1 of password reset: send OTP ────────────────────────────────────
     forgotPassword: publicProcedure
       .input(z.object({ email: z.string().email() }))
       .mutation(async ({ input }) => {
         const user = await getUserByEmail(input.email);
-        if (!user) {
-          // We return success to prevent email enumeration
-          return { success: true };
-        }
-        
-        // Generate a 6 digit OTP
+        // Always return success to prevent email enumeration
+        if (!user) return { success: true };
+
         const otp = Math.floor(100000 + Math.random() * 900000).toString();
-        
-        // Expiry in 15 minutes
         const expiry = new Date(Date.now() + 15 * 60 * 1000);
-        
-        const UserModel = (await import("./models")).UserModel;
+
+        const { UserModel } = await import("./models");
         await UserModel.findOneAndUpdate(
           { email: input.email },
           { $set: { resetPasswordOtp: otp, resetPasswordOtpExpiry: expiry } }
         );
-        
-        console.log(`[DEV OTP NOTIFICATION] OTP for ${input.email} is: ${otp}`);
-        
-        // Try sending via nodemailer. If it fails, we fall back to console logging
-        try {
-          const nodemailer = await import("nodemailer");
-          // Note: configure proper SMTP below for production
-          const transporter = nodemailer.createTransport({
-            host: process.env.SMTP_HOST || 'smtp.ethereal.email',
-            port: parseInt(process.env.SMTP_PORT || '587'),
-            auth: {
-              user: process.env.SMTP_USER || 'ethereal.user@ethereal.email',
-              pass: process.env.SMTP_PASS || 'ethereal.pass',
-            }
-          });
-          
-          await transporter.sendMail({
-            from: '"ForecastIQ Support" <support@forecastiq.com>',
-            to: input.email,
-            subject: 'Password Reset Request',
-            text: `Your password reset OTP is: ${otp}. It is valid for 15 minutes.`,
-          });
-        } catch (error) {
-          console.warn("[Mailer] Failed to send email via SMTP, logged OTP to console instead", error);
-        }
-        
+
+        console.log(`[DEV] Password-reset OTP for ${input.email}: ${otp}`);
+
+        const { sendEmail, otpEmailHtml } = await import("./_core/email");
+        await sendEmail(
+          input.email,
+          "Your ForecastIQ password reset code",
+          otpEmailHtml(otp, "reset")
+        );
+
         return { success: true };
       }),
-      
+
+    // ── Step 2 of password reset: verify OTP and set new password ─────────────
     resetPassword: publicProcedure
-      .input(z.object({ email: z.string().email(), otp: z.string(), newPassword: z.string().min(6) }))
+      .input(z.object({ email: z.string().email(), otp: z.string(), newPassword: z.string().min(8) }))
       .mutation(async ({ input }) => {
-        const UserModel = (await import("./models")).UserModel;
+        const { UserModel } = await import("./models");
         const userDoc = await UserModel.findOne({ email: input.email });
-        
-        if (!userDoc || !userDoc.resetPasswordOtp || !userDoc.resetPasswordOtpExpiry) {
-           throw new Error("Invalid request");
+
+        if (!userDoc?.resetPasswordOtp || !userDoc?.resetPasswordOtpExpiry) {
+          throw new Error("No reset code found. Please request a new one.");
         }
-        
-        if (new Date() > userDoc.resetPasswordOtpExpiry || userDoc.resetPasswordOtp !== input.otp) {
-           throw new Error("Invalid or expired OTP");
+        if (new Date() > userDoc.resetPasswordOtpExpiry) {
+          throw new Error("Reset code has expired. Please request a new one.");
         }
-        
+        if (userDoc.resetPasswordOtp !== input.otp) {
+          throw new Error("Incorrect reset code.");
+        }
+
         const { hashPassword } = await import("./_core/hash");
-        const passwordHash = hashPassword(input.newPassword);
-        
-        userDoc.passwordHash = passwordHash;
+        userDoc.passwordHash = hashPassword(input.newPassword);
         userDoc.resetPasswordOtp = null;
         userDoc.resetPasswordOtpExpiry = null;
         await userDoc.save();
-        
+
         return { success: true };
       }),
 
     logout: publicProcedure.mutation(({ ctx }) => {
       const cookieOptions = getSessionCookieOptions(ctx.req);
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
-      return {
-        success: true,
-      } as const;
+      return { success: true } as const;
+    }),
+
+    deleteAccount: protectedProcedure.mutation(async ({ ctx }) => {
+      const userId = String(ctx.user.id);
+      const { UserModel, SalesDataModel, ForecastModel, ReportModel, UserProfileModel } = await import("./models");
+      await Promise.all([
+        SalesDataModel.deleteMany({ userId }),
+        ForecastModel.deleteMany({ userId }),
+        ReportModel.deleteMany({ userId }),
+        UserProfileModel.deleteMany({ userId }),
+      ]);
+      await UserModel.findByIdAndDelete(userId);
+      const cookieOptions = getSessionCookieOptions(ctx.req);
+      ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
+      return { success: true } as const;
     }),
   }),
 

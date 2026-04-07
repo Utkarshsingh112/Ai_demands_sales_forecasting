@@ -5,6 +5,7 @@ type Theme = "light" | "dark";
 interface ThemeContextType {
   theme: Theme;
   toggleTheme?: () => void;
+  setTheme?: (theme: Theme) => void;
   switchable: boolean;
 }
 
@@ -31,10 +32,13 @@ export function ThemeProvider({
 
   useEffect(() => {
     const root = document.documentElement;
-    if (theme === "dark") {
-      root.classList.add("dark");
-    } else {
+    // CSS uses .light class for light palette; :root is dark by default
+    if (theme === "light") {
+      root.classList.add("light");
       root.classList.remove("dark");
+    } else {
+      root.classList.remove("light");
+      root.classList.add("dark");
     }
 
     if (switchable) {
@@ -48,8 +52,12 @@ export function ThemeProvider({
       }
     : undefined;
 
+  const setThemeValue = switchable
+    ? (t: Theme) => setTheme(t)
+    : undefined;
+
   return (
-    <ThemeContext.Provider value={{ theme, toggleTheme, switchable }}>
+    <ThemeContext.Provider value={{ theme, toggleTheme, setTheme: setThemeValue, switchable }}>
       {children}
     </ThemeContext.Provider>
   );

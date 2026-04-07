@@ -10,16 +10,12 @@ import {
 } from 'recharts';
 import { Download, AlertCircle, Loader2, ArrowLeft } from 'lucide-react';
 import { trpc } from '@/lib/trpc';
-import { useLocation } from 'wouter';
-
-function getIdFromSearch(): string | null {
-  if (typeof window === 'undefined') return null;
-  return new URLSearchParams(window.location.search).get('id');
-}
+import { useLocation, useSearch } from 'wouter';
 
 export default function ForecastResults() {
   const [, setLocation] = useLocation();
-  const forecastId = getIdFromSearch();
+  const search = useSearch();
+  const forecastId = new URLSearchParams(search).get('id');
 
   const { data: forecast, isLoading, error } = trpc.forecast.get.useQuery(
     { id: forecastId! },

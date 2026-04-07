@@ -120,6 +120,21 @@ const userProfileSchema = new Schema<UserProfile>({
 }, { timestamps: true });
 
 
+// OTP Model — stores short-lived OTPs for registration email verification
+// (password-reset OTPs are stored directly on the UserModel)
+const otpSchema = new Schema({
+  email:     { type: String, required: true },
+  otp:       { type: String, required: true },
+  purpose:   { type: String, required: true, enum: ['registration'] },
+  expiresAt: { type: Date,   required: true },
+}, { timestamps: true });
+
+// MongoDB TTL index: auto-delete documents once expiresAt is reached
+otpSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+otpSchema.index({ email: 1, purpose: 1 });
+
+export const OtpModel = mongoose.models.Otp || mongoose.model('Otp', otpSchema);
+
 // Expose id virtual mapping
 [userSchema, salesDataSchema, forecastSchema, reportSchema, userProfileSchema].forEach(schema => {
   schema.virtual('id').get(function(this: any) {

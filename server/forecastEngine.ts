@@ -155,13 +155,14 @@ function generateForecast(
   horizon: number,
   regression: { slope: number; intercept: number; r2: number },
   seasonality: Map<number, number>,
-  avgPricePerUnit: number
+  avgPricePerUnit: number,
+  meanQty: number
 ): { forecastPoints: ForecastPoint[]; trend: 'up' | 'down' | 'stable' } {
   const forecastPoints: ForecastPoint[] = [];
   const lastDate = dates[dates.length - 1];
 
-  // Determine trend
-  const slopeThreshold = 0.01;
+  // Relative slope threshold: 0.3% of mean qty per day is a meaningful trend
+  const slopeThreshold = Math.max(0.01, meanQty * 0.003);
   let trend: 'up' | 'down' | 'stable' = 'stable';
   if (regression.slope > slopeThreshold) trend = 'up';
   else if (regression.slope < -slopeThreshold) trend = 'down';
@@ -268,8 +269,11 @@ export async function runForecast(records: SalesRecord[], horizon: number = 30):
   // Step 2: Calculate moving averages
   const ma7 = calculateWeightedMovingAverage(qtyValues, Math.min(7, qtyValues.length));
 
-  // Step 3: Linear regression
+  // Step 3: Linear regression (on smoothed data for forecasting)
   const regression = linearRegression(ma7);
+
+  // Separate regression on raw data for honest confidence scoring
+  const rawRegression = linearRegression(qtyValues);
 
   // Step 4: Seasonality
   const seasonality = detectSeasonality(dates, qtyValues);
@@ -278,9 +282,10 @@ export async function runForecast(records: SalesRecord[], horizon: number = 30):
   const totalQty = qtyValues.reduce((a, b) => a + b, 0);
   const totalRevenue = revenueValues.reduce((a, b) => a + b, 0);
   const avgPricePerUnit = totalQty > 0 ? totalRevenue / totalQty : 1;
+  const meanQty = totalQty / qtyValues.length;
 
   // Step 5-6: Generate forecast
-  const { forecastPoints, trend } = generateForecast(qtyValues, dates, horizon, regression, seasonality, avgPricePerUnit);
+  const { forecastPoints, trend } = generateForecast(qtyValues, dates, horizon, regression, seasonality, avgPricePerUnit, meanQty);
   
   // Product-level forecasts
   const productMap = new Map<string, SalesRecord[]>();
@@ -322,12 +327,17 @@ export async function runForecast(records: SalesRecord[], horizon: number = 30):
     });
   });
   
+  // Confidence: raw R² (0–79 pts) + data-size bonus (1 pt per day, up to 20)
+  // Minimum 5 so we never show a flat 0% when we clearly ran a forecast
+  const dataSizeBonus = Math.min(20, qtyValues.length);
+  const confidenceScore = Math.max(5, Math.min(99, Math.round(rawRegression.r2 * 79) + dataSizeBonus));
+
   // Generate insights
-  const insights = generateInsights(productForecasts, trend, regression.r2 * 100);
-  
+  const insights = generateInsights(productForecasts, trend, confidenceScore);
+
   return {
     overallTrend: trend,
-    confidenceScore: Math.round(regression.r2 * 100),
+    confidenceScore,
     forecastData: forecastPoints,
     productForecasts,
     insights,
